@@ -19,6 +19,7 @@ public class FirestoreService {
         this.firestore = FirestoreClient.getFirestore();
     }
 
+    
     /**
      * Save a document to a collection
      * @param collectionName The name of the collection
