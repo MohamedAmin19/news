@@ -2,10 +2,12 @@ package com.news.controller;
 
 import com.news.model.NewsArticle;
 import com.news.service.FirestoreService;
+import com.news.service.CloudinaryImageService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,23 +18,59 @@ import java.util.stream.Collectors;
 public class NewsController {
 
     private final FirestoreService firestoreService;
+    private final CloudinaryImageService imageService;
     private static final String COLLECTION_NAME = "news";
 
-    public NewsController(FirestoreService firestoreService) {
+    public NewsController(FirestoreService firestoreService, CloudinaryImageService imageService) {
         this.firestoreService = firestoreService;
+        this.imageService = imageService;
     }
 
     @PostMapping
-    public ResponseEntity<NewsArticle> addNews(@RequestBody NewsArticle article) {
-        Map<String, Object> data = article.toMap();
-        String documentId = firestoreService.save(COLLECTION_NAME, null, data);
-        article.setId(documentId);
-        return ResponseEntity.status(HttpStatus.CREATED).body(article);
+    public ResponseEntity<?> addNews(@RequestBody NewsArticle article) {
+        try {
+            // Process image if it's base64
+            if (article.getImage() != null && !article.getImage().isEmpty()) {
+                // Check if it's a base64 data URL
+                if (article.getImage().startsWith("data:image/") || 
+                    (article.getImage().length() > 100 && !article.getImage().startsWith("http"))) {
+                    try {
+                        String imageUrl = imageService.uploadBase64Image(article.getImage());
+                        article.setImage(imageUrl);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, String> error = new HashMap<>();
+                        error.put("error", "Invalid image: " + e.getMessage());
+                        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+                    } catch (IOException e) {
+                        Map<String, String> error = new HashMap<>();
+                        error.put("error", "Failed to upload image: " + e.getMessage());
+                        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+                    }
+                }
+            }
+            
+            Map<String, Object> data = article.toMap();
+            String documentId = firestoreService.save(COLLECTION_NAME, null, data);
+            article.setId(documentId);
+            return ResponseEntity.status(HttpStatus.CREATED).body(article);
+        } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Failed to create news: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
     }
 
-    @GetMapping
-    public ResponseEntity<List<NewsArticle>> getAllNews() {
-        List<Map<String, Object>> documents = firestoreService.getAll(COLLECTION_NAME);
+    @GetMapping("/category/{category}")
+    public ResponseEntity<List<NewsArticle>> getNewsByCategory(@PathVariable String category) {
+        List<Map<String, Object>> documents;
+        
+        // If category is "all", return all news; otherwise filter by category
+        if ("all".equalsIgnoreCase(category)) {
+            documents = firestoreService.getAll(COLLECTION_NAME);
+        } else {
+            documents = firestoreService.query(COLLECTION_NAME, "category", category);
+        }
+        
         List<NewsArticle> articles = documents.stream()
                 .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
                 .collect(Collectors.toList());
@@ -49,26 +87,54 @@ public class NewsController {
         return ResponseEntity.notFound().build();
     }
 
-    @GetMapping("/category/{category}")
-    public ResponseEntity<List<NewsArticle>> getNewsByCategory(@PathVariable String category) {
-        List<Map<String, Object>> documents = firestoreService.query(COLLECTION_NAME, "category", category);
-        List<NewsArticle> articles = documents.stream()
-                .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
-                .collect(Collectors.toList());
-        return ResponseEntity.ok(articles);
-    }
-
     @PutMapping("/{id}")
-    public ResponseEntity<NewsArticle> updateNews(@PathVariable String id, @RequestBody NewsArticle article) {
-        Map<String, Object> existingData = firestoreService.get(COLLECTION_NAME, id);
-        if (existingData == null) {
-            return ResponseEntity.notFound().build();
+    public ResponseEntity<?> updateNews(@PathVariable String id, @RequestBody NewsArticle article) {
+        try {
+            Map<String, Object> existingData = firestoreService.get(COLLECTION_NAME, id);
+            if (existingData == null) {
+                return ResponseEntity.notFound().build();
+            }
+            
+            // Process image if it's base64
+            if (article.getImage() != null && !article.getImage().isEmpty()) {
+                // Check if it's a base64 data URL
+                if (article.getImage().startsWith("data:image/") || 
+                    (article.getImage().length() > 100 && !article.getImage().startsWith("http"))) {
+                    try {
+                        // Delete old image from Cloudinary if it exists
+                        String oldImage = existingData.get("image") != null ? 
+                            existingData.get("image").toString() : null;
+                        if (oldImage != null && oldImage.contains("cloudinary.com")) {
+                            try {
+                                imageService.deleteImage(oldImage);
+                            } catch (Exception e) {
+                                // Ignore deletion errors
+                            }
+                        }
+                        
+                        String imageUrl = imageService.uploadBase64Image(article.getImage());
+                        article.setImage(imageUrl);
+                    } catch (IllegalArgumentException e) {
+                        Map<String, String> error = new HashMap<>();
+                        error.put("error", "Invalid image: " + e.getMessage());
+                        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+                    } catch (IOException e) {
+                        Map<String, String> error = new HashMap<>();
+                        error.put("error", "Failed to upload image: " + e.getMessage());
+                        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+                    }
+                }
+            }
+            
+            Map<String, Object> updateData = article.toMap();
+            firestoreService.update(COLLECTION_NAME, id, updateData);
+            article.setId(id);
+            return ResponseEntity.ok(article);
+        } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", "Failed to update news: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
-        
-        Map<String, Object> updateData = article.toMap();
-        firestoreService.update(COLLECTION_NAME, id, updateData);
-        article.setId(id);
-        return ResponseEntity.ok(article);
     }
 
     @DeleteMapping("/{id}")

@@ -26,7 +26,7 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news").permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/images/**").authenticated()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news/{id}").permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/news/category/**").permitAll()
                 .requestMatchers("/api/admin/news/**").authenticated()
