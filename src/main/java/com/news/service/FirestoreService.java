@@ -90,6 +90,47 @@ public class FirestoreService {
     }
 
     /**
+     * Get all documents from a collection with pagination
+     * @param collectionName The name of the collection
+     * @param page Page number (0-indexed)
+     * @param size Page size
+     * @return PaginationResult containing documents and pagination info
+     */
+    public PaginationResult getAllPaginated(String collectionName, int page, int size) {
+        try {
+            // Get total count
+            ApiFuture<QuerySnapshot> countFuture = firestore.collection(collectionName).get();
+            QuerySnapshot countSnapshot = countFuture.get();
+            long totalElements = countSnapshot.size();
+            
+            // Calculate pagination
+            int offset = page * size;
+            int totalPages = (int) Math.ceil((double) totalElements / size);
+            
+            // Get paginated documents
+            Query query = firestore.collection(collectionName)
+                    .limit(size)
+                    .offset(offset);
+            
+            ApiFuture<QuerySnapshot> future = query.get();
+            QuerySnapshot querySnapshot = future.get();
+            List<Map<String, Object>> documents = new ArrayList<>();
+            
+            for (DocumentSnapshot document : querySnapshot.getDocuments()) {
+                Map<String, Object> data = document.getData();
+                if (data != null) {
+                    data.put("id", document.getId());
+                    documents.add(data);
+                }
+            }
+            
+            return new PaginationResult(documents, totalElements, totalPages);
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException("Error getting paginated documents from Firestore", e);
+        }
+    }
+
+    /**
      * Query documents with a where clause (equality)
      * @param collectionName The name of the collection
      * @param field The field to filter on
@@ -114,6 +155,78 @@ public class FirestoreService {
             return documents;
         } catch (InterruptedException | ExecutionException e) {
             throw new RuntimeException("Error querying documents from Firestore", e);
+        }
+    }
+
+    /**
+     * Query documents with a where clause (equality) with pagination
+     * @param collectionName The name of the collection
+     * @param field The field to filter on
+     * @param value The value to compare against
+     * @param page Page number (0-indexed)
+     * @param size Page size
+     * @return PaginationResult containing documents and pagination info
+     */
+    public PaginationResult queryPaginated(String collectionName, String field, Object value, int page, int size) {
+        try {
+            // Get total count
+            Query countQuery = firestore.collection(collectionName).whereEqualTo(field, value);
+            ApiFuture<QuerySnapshot> countFuture = countQuery.get();
+            QuerySnapshot countSnapshot = countFuture.get();
+            long totalElements = countSnapshot.size();
+            
+            // Calculate pagination
+            int offset = page * size;
+            int totalPages = (int) Math.ceil((double) totalElements / size);
+            
+            // Get paginated documents
+            Query query = firestore.collection(collectionName)
+                    .whereEqualTo(field, value)
+                    .limit(size)
+                    .offset(offset);
+            
+            ApiFuture<QuerySnapshot> future = query.get();
+            QuerySnapshot querySnapshot = future.get();
+            List<Map<String, Object>> documents = new ArrayList<>();
+            
+            for (DocumentSnapshot document : querySnapshot.getDocuments()) {
+                Map<String, Object> data = document.getData();
+                if (data != null) {
+                    data.put("id", document.getId());
+                    documents.add(data);
+                }
+            }
+            
+            return new PaginationResult(documents, totalElements, totalPages);
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException("Error querying paginated documents from Firestore", e);
+        }
+    }
+
+    /**
+     * Inner class to hold pagination results
+     */
+    public static class PaginationResult {
+        private final List<Map<String, Object>> documents;
+        private final long totalElements;
+        private final int totalPages;
+
+        public PaginationResult(List<Map<String, Object>> documents, long totalElements, int totalPages) {
+            this.documents = documents;
+            this.totalElements = totalElements;
+            this.totalPages = totalPages;
+        }
+
+        public List<Map<String, Object>> getDocuments() {
+            return documents;
+        }
+
+        public long getTotalElements() {
+            return totalElements;
+        }
+
+        public int getTotalPages() {
+            return totalPages;
         }
     }
 

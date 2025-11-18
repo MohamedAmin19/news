@@ -1,6 +1,7 @@
 package com.news.controller;
 
 import com.news.model.NewsArticle;
+import com.news.model.PaginatedResponse;
 import com.news.service.FirestoreService;
 import com.news.service.CloudinaryImageService;
 import org.springframework.http.HttpStatus;
@@ -61,20 +62,40 @@ public class NewsController {
     }
 
     @GetMapping("/category/{category}")
-    public ResponseEntity<List<NewsArticle>> getNewsByCategory(@PathVariable String category) {
-        List<Map<String, Object>> documents;
+    public ResponseEntity<PaginatedResponse<NewsArticle>> getNewsByCategory(
+            @PathVariable String category,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        // Validate pagination parameters
+        if (page < 0) page = 0;
+        if (size < 1) size = 10;
+        if (size > 100) size = 100; // Max page size
+        
+        FirestoreService.PaginationResult result;
         
         // If category is "all", return all news; otherwise filter by category
         if ("all".equalsIgnoreCase(category)) {
-            documents = firestoreService.getAll(COLLECTION_NAME);
+            result = firestoreService.getAllPaginated(COLLECTION_NAME, page, size);
         } else {
-            documents = firestoreService.query(COLLECTION_NAME, "category", category);
+            result = firestoreService.queryPaginated(COLLECTION_NAME, "category", category, page, size);
         }
         
-        List<NewsArticle> articles = documents.stream()
+        List<NewsArticle> articles = result.getDocuments().stream()
                 .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
                 .collect(Collectors.toList());
-        return ResponseEntity.ok(articles);
+        
+        PaginatedResponse<NewsArticle> response = new PaginatedResponse<>(
+                articles,
+                page,
+                size,
+                result.getTotalElements(),
+                result.getTotalPages(),
+                page < result.getTotalPages() - 1,
+                page > 0
+        );
+        
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}")

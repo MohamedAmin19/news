@@ -1,6 +1,7 @@
 package com.news.controller;
 
 import com.news.model.NewsArticle;
+import com.news.model.PaginatedResponse;
 import com.news.service.FirestoreService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,7 +22,7 @@ public class AdminNewsController {
     }
 
     /**
-     * Get all news with filtering (requires authentication)
+     * Get all news with filtering and pagination (requires authentication)
      * Query parameters (all optional):
      * - titleEnglish: filter by English title (exact match)
      * - titleArabic: filter by Arabic title (exact match)
@@ -29,26 +30,36 @@ public class AdminNewsController {
      * - descriptionArabic: filter by Arabic description (exact match)
      * - category: filter by category (exact match)
      * - date: filter by date (exact match)
+     * - page: page number (default: 0)
+     * - size: page size (default: 10, max: 100)
      */
     @GetMapping
-    public ResponseEntity<List<NewsArticle>> getAllNewsWithFiltering(
+    public ResponseEntity<PaginatedResponse<NewsArticle>> getAllNewsWithFiltering(
             @RequestParam(required = false) String titleEnglish,
             @RequestParam(required = false) String titleArabic,
             @RequestParam(required = false) String descriptionEnglish,
             @RequestParam(required = false) String descriptionArabic,
             @RequestParam(required = false) String category,
-            @RequestParam(required = false) String date) {
-        List<Map<String, Object>> documents;
+            @RequestParam(required = false) String date,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        
+        // Validate pagination parameters
+        if (page < 0) page = 0;
+        if (size < 1) size = 10;
+        if (size > 100) size = 100; // Max page size
+        
+        FirestoreService.PaginationResult result;
         
         // Use Firestore query for category if provided (more efficient)
         if (category != null && !category.isEmpty()) {
-            documents = firestoreService.query(COLLECTION_NAME, "category", category);
+            result = firestoreService.queryPaginated(COLLECTION_NAME, "category", category, page, size);
         } else {
-            documents = firestoreService.getAll(COLLECTION_NAME);
+            result = firestoreService.getAllPaginated(COLLECTION_NAME, page, size);
         }
         
         // Apply client-side filtering for all fields
-        List<NewsArticle> articles = documents.stream()
+        List<NewsArticle> articles = result.getDocuments().stream()
                 .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
                 .filter(article -> {
                     // Filter by titleEnglish
@@ -90,7 +101,21 @@ public class AdminNewsController {
                 })
                 .collect(Collectors.toList());
         
-        return ResponseEntity.ok(articles);
+        // Recalculate total after filtering (approximate)
+        long totalElements = articles.size();
+        int totalPages = (int) Math.ceil((double) totalElements / size);
+        
+        PaginatedResponse<NewsArticle> response = new PaginatedResponse<>(
+                articles,
+                page,
+                size,
+                totalElements,
+                totalPages,
+                page < totalPages - 1,
+                page > 0
+        );
+        
+        return ResponseEntity.ok(response);
     }
 
     /**
