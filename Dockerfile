@@ -10,20 +10,21 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-# Runtime stage
-FROM eclipse-temurin:17-jre-alpine
+# Runtime stage - Use full JRE (not Alpine) to avoid native library issues
+FROM eclipse-temurin:17-jre
 WORKDIR /app
 
 # Create non-root user
-RUN addgroup -S spring && adduser -S spring -G spring
+RUN groupadd -r spring && useradd -r -g spring spring
 USER spring:spring
 
 # Copy the built JAR from build stage
 COPY --from=build /app/target/*.jar app.jar
 
-# Expose port
+# Expose port (Render will set PORT env var)
 EXPOSE 8080
 
 # Run the application
+# PORT environment variable is automatically used by Spring Boot via application.properties
 ENTRYPOINT ["java", "-jar", "app.jar"]
 
