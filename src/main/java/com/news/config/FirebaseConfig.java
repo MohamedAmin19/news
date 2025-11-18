@@ -11,9 +11,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
 
 import jakarta.annotation.PostConstruct;
+import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 @Configuration
 public class FirebaseConfig {
@@ -27,6 +29,9 @@ public class FirebaseConfig {
     @Value("${firebase.project-id:}")
     private String projectId;
 
+    @Value("${FIREBASE_SERVICE_ACCOUNT_JSON:}")
+    private String serviceAccountJson;
+
     @PostConstruct
     public void initialize() {
         try {
@@ -34,14 +39,21 @@ public class FirebaseConfig {
                 FirebaseOptions.Builder builder = FirebaseOptions.builder();
                 boolean credentialsSet = false;
 
-                // Option 1: Use service account resource (from classpath) - prioritize this
-                if (serviceAccountResource != null && serviceAccountResource.exists()) {
+                // Option 1: Use service account JSON from environment variable (for production/cloud deployments)
+                if (serviceAccountJson != null && !serviceAccountJson.isEmpty()) {
+                    InputStream serviceAccount = new ByteArrayInputStream(serviceAccountJson.getBytes(StandardCharsets.UTF_8));
+                    GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
+                    builder.setCredentials(credentials);
+                    credentialsSet = true;
+                }
+                // Option 2: Use service account resource (from classpath) - for local development
+                else if (serviceAccountResource != null && serviceAccountResource.exists()) {
                     InputStream serviceAccount = serviceAccountResource.getInputStream();
                     GoogleCredentials credentials = GoogleCredentials.fromStream(serviceAccount);
                     builder.setCredentials(credentials);
                     credentialsSet = true;
                 }
-                // Option 2: Use service account file path (only if file exists)
+                // Option 3: Use service account file path (only if file exists)
                 else if (serviceAccountPath != null && !serviceAccountPath.isEmpty()) {
                     java.io.File file = new java.io.File(serviceAccountPath);
                     if (file.exists() && file.isFile()) {
@@ -52,14 +64,14 @@ public class FirebaseConfig {
                     }
                 }
 
-                // Option 3: Use default credentials (for GCP environments)
+                // Option 4: Use default credentials (for GCP environments)
                 if (!credentialsSet) {
                     try {
                         GoogleCredentials credentials = GoogleCredentials.getApplicationDefault();
                         builder.setCredentials(credentials);
                         credentialsSet = true;
                     } catch (IOException e) {
-                        throw new RuntimeException("Failed to initialize Firebase: No service account file found. Please ensure serviceAccountKey.json exists in src/main/resources/ or configure firebase.service-account.path in application.properties", e);
+                        throw new RuntimeException("Failed to initialize Firebase: No service account credentials found. Please set FIREBASE_SERVICE_ACCOUNT_JSON environment variable or ensure serviceAccountKey.json exists in src/main/resources/", e);
                     }
                 }
 
