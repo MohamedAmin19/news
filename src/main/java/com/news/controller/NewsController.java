@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,7 @@ public class NewsController {
     @GetMapping("/category/{category}")
     public ResponseEntity<PaginatedResponse<NewsArticle>> getNewsByCategory(
             @PathVariable String category,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         
@@ -72,26 +74,76 @@ public class NewsController {
         if (size < 1) size = 10;
         if (size > 100) size = 100; // Max page size
         
-        FirestoreService.PaginationResult result;
+        List<NewsArticle> articles;
+        long totalElements;
+        int totalPages;
         
-        // If category is "all", return all news; otherwise filter by category
-        if ("all".equalsIgnoreCase(category)) {
-            result = firestoreService.getAllPaginated(COLLECTION_NAME, page, size);
+        // If search is provided, we need to get all matching documents first, then paginate
+        if (search != null && !search.trim().isEmpty()) {
+            String searchLower = search.toLowerCase().trim();
+            List<Map<String, Object>> allDocuments;
+            
+            // If category is "all", get all news; otherwise filter by category first
+            if ("all".equalsIgnoreCase(category)) {
+                allDocuments = firestoreService.getAll(COLLECTION_NAME);
+            } else {
+                allDocuments = firestoreService.query(COLLECTION_NAME, "category", category);
+            }
+            
+            // Apply search filter across all fields
+            List<NewsArticle> allFilteredArticles = allDocuments.stream()
+                    .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
+                    .filter(article -> {
+                        return (article.getTitleEnglish() != null && 
+                                article.getTitleEnglish().toLowerCase().contains(searchLower)) ||
+                               (article.getTitleArabic() != null && 
+                                article.getTitleArabic().toLowerCase().contains(searchLower)) ||
+                               (article.getDescriptionEnglish() != null && 
+                                article.getDescriptionEnglish().toLowerCase().contains(searchLower)) ||
+                               (article.getDescriptionArabic() != null && 
+                                article.getDescriptionArabic().toLowerCase().contains(searchLower)) ||
+                               (article.getCategory() != null && 
+                                article.getCategory().toLowerCase().contains(searchLower)) ||
+                               (article.getDate() != null && 
+                                article.getDate().toLowerCase().contains(searchLower));
+                    })
+                    .collect(Collectors.toList());
+            
+            // Apply pagination to filtered results
+            totalElements = allFilteredArticles.size();
+            totalPages = (int) Math.ceil((double) totalElements / size);
+            int start = page * size;
+            int end = Math.min(start + size, allFilteredArticles.size());
+            
+            articles = start < allFilteredArticles.size() 
+                    ? allFilteredArticles.subList(start, end)
+                    : new ArrayList<>();
         } else {
-            result = firestoreService.queryPaginated(COLLECTION_NAME, "category", category, page, size);
+            // No search - use normal pagination
+            FirestoreService.PaginationResult result;
+            
+            // If category is "all", return all news; otherwise filter by category
+            if ("all".equalsIgnoreCase(category)) {
+                result = firestoreService.getAllPaginated(COLLECTION_NAME, page, size);
+            } else {
+                result = firestoreService.queryPaginated(COLLECTION_NAME, "category", category, page, size);
+            }
+            
+            articles = result.getDocuments().stream()
+                    .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
+                    .collect(Collectors.toList());
+            
+            totalElements = result.getTotalElements();
+            totalPages = result.getTotalPages();
         }
-        
-        List<NewsArticle> articles = result.getDocuments().stream()
-                .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
-                .collect(Collectors.toList());
         
         PaginatedResponse<NewsArticle> response = new PaginatedResponse<>(
                 articles,
                 page,
                 size,
-                result.getTotalElements(),
-                result.getTotalPages(),
-                page < result.getTotalPages() - 1,
+                totalElements,
+                totalPages,
+                page < totalPages - 1,
                 page > 0
         );
         
