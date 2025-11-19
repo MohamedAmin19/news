@@ -6,6 +6,7 @@ import com.news.service.FirestoreService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -22,25 +23,15 @@ public class AdminNewsController {
     }
 
     /**
-     * Get all news with filtering and pagination (requires authentication)
-     * Query parameters (all optional):
-     * - titleEnglish: filter by English title (exact match)
-     * - titleArabic: filter by Arabic title (exact match)
-     * - descriptionEnglish: filter by English description (exact match)
-     * - descriptionArabic: filter by Arabic description (exact match)
-     * - category: filter by category (exact match)
-     * - date: filter by date (exact match)
+     * Get all news with search and pagination (requires authentication)
+     * Query parameters:
+     * - search: search term to match in titleEnglish, titleArabic, descriptionEnglish, descriptionArabic, category, and date (case-insensitive, partial match)
      * - page: page number (default: 0)
      * - size: page size (default: 10, max: 100)
      */
     @GetMapping
-    public ResponseEntity<PaginatedResponse<NewsArticle>> getAllNewsWithFiltering(
-            @RequestParam(required = false) String titleEnglish,
-            @RequestParam(required = false) String titleArabic,
-            @RequestParam(required = false) String descriptionEnglish,
-            @RequestParam(required = false) String descriptionArabic,
-            @RequestParam(required = false) String category,
-            @RequestParam(required = false) String date,
+    public ResponseEntity<PaginatedResponse<NewsArticle>> getAllNewsWithSearch(
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         
@@ -49,69 +40,117 @@ public class AdminNewsController {
         if (size < 1) size = 10;
         if (size > 100) size = 100; // Max page size
         
-        FirestoreService.PaginationResult result;
+        // Get all news (we'll filter in memory for search)
+        FirestoreService.PaginationResult result = firestoreService.getAllPaginated(COLLECTION_NAME, page, size);
         
-        // Use Firestore query for category if provided (more efficient)
-        if (category != null && !category.isEmpty()) {
-            result = firestoreService.queryPaginated(COLLECTION_NAME, "category", category, page, size);
-        } else {
-            result = firestoreService.getAllPaginated(COLLECTION_NAME, page, size);
-        }
-        
-        // Apply client-side filtering for all fields
+        // Apply search filter if provided
         List<NewsArticle> articles = result.getDocuments().stream()
                 .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
                 .filter(article -> {
-                    // Filter by titleEnglish
-                    if (titleEnglish != null && !titleEnglish.isEmpty()) {
-                        if (article.getTitleEnglish() == null || !article.getTitleEnglish().equals(titleEnglish)) {
-                            return false;
-                        }
+                    // If no search term, return all articles
+                    if (search == null || search.trim().isEmpty()) {
+                        return true;
                     }
                     
-                    // Filter by titleArabic
-                    if (titleArabic != null && !titleArabic.isEmpty()) {
-                        if (article.getTitleArabic() == null || !article.getTitleArabic().equals(titleArabic)) {
-                            return false;
-                        }
+                    String searchLower = search.toLowerCase().trim();
+                    
+                    // Search in titleEnglish
+                    if (article.getTitleEnglish() != null && 
+                        article.getTitleEnglish().toLowerCase().contains(searchLower)) {
+                        return true;
                     }
                     
-                    // Filter by descriptionEnglish
-                    if (descriptionEnglish != null && !descriptionEnglish.isEmpty()) {
-                        if (article.getDescriptionEnglish() == null || !article.getDescriptionEnglish().equals(descriptionEnglish)) {
-                            return false;
-                        }
+                    // Search in titleArabic
+                    if (article.getTitleArabic() != null && 
+                        article.getTitleArabic().toLowerCase().contains(searchLower)) {
+                        return true;
                     }
                     
-                    // Filter by descriptionArabic
-                    if (descriptionArabic != null && !descriptionArabic.isEmpty()) {
-                        if (article.getDescriptionArabic() == null || !article.getDescriptionArabic().equals(descriptionArabic)) {
-                            return false;
-                        }
+                    // Search in descriptionEnglish
+                    if (article.getDescriptionEnglish() != null && 
+                        article.getDescriptionEnglish().toLowerCase().contains(searchLower)) {
+                        return true;
                     }
                     
-                    // Filter by date
-                    if (date != null && !date.isEmpty()) {
-                        if (article.getDate() == null || !article.getDate().equals(date)) {
-                            return false;
-                        }
+                    // Search in descriptionArabic
+                    if (article.getDescriptionArabic() != null && 
+                        article.getDescriptionArabic().toLowerCase().contains(searchLower)) {
+                        return true;
                     }
                     
-                    return true;
+                    // Search in category
+                    if (article.getCategory() != null && 
+                        article.getCategory().toLowerCase().contains(searchLower)) {
+                        return true;
+                    }
+                    
+                    // Search in date
+                    if (article.getDate() != null && 
+                        article.getDate().toLowerCase().contains(searchLower)) {
+                        return true;
+                    }
+                    
+                    return false;
                 })
                 .collect(Collectors.toList());
         
-        // Recalculate total after filtering (approximate)
-        long totalElements = articles.size();
-        int totalPages = (int) Math.ceil((double) totalElements / size);
+        // If search was applied, we need to get all results first, then paginate
+        if (search != null && !search.trim().isEmpty()) {
+            // Get all documents for search
+            List<Map<String, Object>> allDocuments = firestoreService.getAll(COLLECTION_NAME);
+            
+            // Apply search filter to all documents
+            List<NewsArticle> allFilteredArticles = allDocuments.stream()
+                    .map(doc -> NewsArticle.fromMap(doc.get("id").toString(), doc))
+                    .filter(article -> {
+                        String searchLower = search.toLowerCase().trim();
+                        
+                        return (article.getTitleEnglish() != null && 
+                                article.getTitleEnglish().toLowerCase().contains(searchLower)) ||
+                               (article.getTitleArabic() != null && 
+                                article.getTitleArabic().toLowerCase().contains(searchLower)) ||
+                               (article.getDescriptionEnglish() != null && 
+                                article.getDescriptionEnglish().toLowerCase().contains(searchLower)) ||
+                               (article.getDescriptionArabic() != null && 
+                                article.getDescriptionArabic().toLowerCase().contains(searchLower)) ||
+                               (article.getCategory() != null && 
+                                article.getCategory().toLowerCase().contains(searchLower)) ||
+                               (article.getDate() != null && 
+                                article.getDate().toLowerCase().contains(searchLower));
+                    })
+                    .collect(Collectors.toList());
+            
+            // Apply pagination to filtered results
+            long totalElements = allFilteredArticles.size();
+            int totalPages = (int) Math.ceil((double) totalElements / size);
+            int start = page * size;
+            int end = Math.min(start + size, allFilteredArticles.size());
+            
+            articles = start < allFilteredArticles.size() 
+                    ? allFilteredArticles.subList(start, end)
+                    : new ArrayList<>();
+            
+            PaginatedResponse<NewsArticle> response = new PaginatedResponse<>(
+                    articles,
+                    page,
+                    size,
+                    totalElements,
+                    totalPages,
+                    page < totalPages - 1,
+                    page > 0
+            );
+            
+            return ResponseEntity.ok(response);
+        }
         
+        // No search - use normal pagination
         PaginatedResponse<NewsArticle> response = new PaginatedResponse<>(
                 articles,
                 page,
                 size,
-                totalElements,
-                totalPages,
-                page < totalPages - 1,
+                result.getTotalElements(),
+                result.getTotalPages(),
+                page < result.getTotalPages() - 1,
                 page > 0
         );
         
