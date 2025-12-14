@@ -19,6 +19,9 @@ public class NewsArticle {
     private String image;
     private String date;
     private String category;
+    private Boolean isArabic;
+    private Boolean isEnglish;
+    private Boolean isFeatured;
 
     /**
      * Convert NewsArticle to Map for Firestore
@@ -32,6 +35,9 @@ public class NewsArticle {
         if (image != null) map.put("image", image);
         if (date != null) map.put("date", date);
         if (category != null) map.put("category", category);
+        if (isArabic != null) map.put("isArabic", isArabic);
+        if (isEnglish != null) map.put("isEnglish", isEnglish);
+        if (isFeatured != null) map.put("isFeatured", isFeatured);
         return map;
     }
 
@@ -48,6 +54,30 @@ public class NewsArticle {
         if (data.get("image") != null) article.setImage(data.get("image").toString());
         if (data.get("date") != null) article.setDate(data.get("date").toString());
         if (data.get("category") != null) article.setCategory(data.get("category").toString());
+        if (data.get("isArabic") != null) {
+            Object isArabicValue = data.get("isArabic");
+            if (isArabicValue instanceof Boolean) {
+                article.setIsArabic((Boolean) isArabicValue);
+            } else {
+                article.setIsArabic(Boolean.parseBoolean(isArabicValue.toString()));
+            }
+        }
+        if (data.get("isEnglish") != null) {
+            Object isEnglishValue = data.get("isEnglish");
+            if (isEnglishValue instanceof Boolean) {
+                article.setIsEnglish((Boolean) isEnglishValue);
+            } else {
+                article.setIsEnglish(Boolean.parseBoolean(isEnglishValue.toString()));
+            }
+        }
+        if (data.get("isFeatured") != null) {
+            Object isFeaturedValue = data.get("isFeatured");
+            if (isFeaturedValue instanceof Boolean) {
+                article.setIsFeatured((Boolean) isFeaturedValue);
+            } else {
+                article.setIsFeatured(Boolean.parseBoolean(isFeaturedValue.toString()));
+            }
+        }
         return article;
     }
 }
